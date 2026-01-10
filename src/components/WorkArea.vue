@@ -2,7 +2,17 @@
   <div class="work-area">
     <div class="content">
         <div class="video-panel-full">
-          <template v-if="videoSources && videoSources[0]">
+          <!-- Show WebSocket stream if connected and has frame -->
+          <template v-if="currentFrame">
+            <img
+              class="video-player-full"
+              :src="currentFrame"
+              alt="实时视频流"
+            />
+          </template>
+
+          <!-- Show fallback video if provided and no WebSocket stream -->
+          <template v-else-if="videoSources && videoSources[0]">
             <video
               class="video-player-full"
               :src="videoSources[0]"
@@ -13,10 +23,23 @@
             ></video>
           </template>
 
+          <!-- Show empty state with connection status -->
           <template v-else>
             <div class="video-empty-full">
-              <div class="empty-text">暂无视频</div>
-              <button class="retry-btn" @click="$emit('retry', 0)">重试</button>
+              <svg class="camera-icon" viewBox=                      "0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M23 7L16 12L23 17V7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <rect x="1" y="5" width="15" height="14" rx="2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <div class="empty-text">
+                {{ connectionStatus }}
+              </div>
+              <button 
+                class="retry-btn" 
+                @click="reconnectWebSocket"
+                :disabled="isConnecting"
+              >
+                {{ isConnecting ? '连接中...' : '重新连接' }}
+              </button>
             </div>
           </template>
         </div>
@@ -25,7 +48,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 
 const props = defineProps({
   activeStep: {
@@ -41,10 +64,168 @@ const props = defineProps({
   panels: {
     type: Number,
     default: 1
+  },
+  // WebSocket URL (can be overridden via prop)
+  wsUrl: {
+    type: String,
+    default: 'ws://36.103.203.206:8000/ai/video'
   }
 })
 
 const emit = defineEmits(['retry'])
+
+// WebSocket state
+let ws = null
+const currentFrame = ref(null)
+const isConnecting = ref(false)
+const connectionStatus = ref('正在连接视频流...')
+const clientIdData = ref(null)
+
+// 获取当前摄像头 client_id
+const fetchClientId = async () => {
+  // 测试模式：写死 client_id
+  return 'test'
+  
+  /* 正式模式：从后端获取 client_id
+  try {
+    // 开发环境使用代理，生产环境直接请求
+    const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
+    const apiUrl = import.meta.env.DEV 
+      ? '/api/gdmp/v1/api/nt/get_current_client_id'
+      : `${backendBase}/gdmp/v1/api/nt/get_current_client_id`
+    
+    const response = await fetch(apiUrl)
+    const data = await response.json()
+    
+    if (data.code === 200 && data.client_id) {
+      clientIdData.value = data
+      console.log('获取到摄像头 client_id:', data.client_id)
+      return data.client_id
+    } else {
+      console.log('当前没有正在进行的清洗任务')
+      connectionStatus.value = '当前没有正在进行的清洗任务'
+      return null
+    }
+  } catch (error) {
+    console.error('获取 client_id 失败:', error)
+    connectionStatus.value = '无法获取摄像头信息'
+    return null
+  }
+  */
+}
+
+// Build final WS url with client_id param
+const buildWsUrl = async () => {
+  const base = props.wsUrl
+  const cid = await fetchClientId()
+  
+  if (!cid) {
+    return null // 没有 client_id，不建立连接
+  }
+  
+  // Allow http(s) input and convert to ws(s)
+  let url = base
+  if (url.startsWith('http://')) url = 'ws://' + url.slice(7)
+  if (url.startsWith('https://')) url = 'wss://' + url.slice(8)
+  const hasQuery = url.includes('?')
+  const hasClientParam = /[?&]client_id=/.test(url)
+  if (!hasClientParam) {
+    url += (hasQuery ? '&' : '?') + `client_id=${encodeURIComponent(cid)}`
+  }
+  return url
+}
+
+// Connect to WebSocket and handle incoming frames
+const connectWebSocket = async () => {
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+    return // already connecting or connected
+  }
+
+  isConnecting.value = true
+  connectionStatus.value = '正在获取摄像头信息...'
+
+  try {
+    const finalUrl = await buildWsUrl()
+    
+    if (!finalUrl) {
+      isConnecting.value = false
+      return // 没有 client_id，不建立连接
+    }
+    
+    ws = new WebSocket(finalUrl)
+
+    ws.onopen = () => {
+      console.log('WebSocket 已连接:', finalUrl)
+      isConnecting.value = false
+      connectionStatus.value = '视频流已连接'
+    }
+
+    ws.onmessage = (event) => {
+      // Expecting Base64 encoded JPEG data
+      const data = event.data
+      
+      // Check if it's already a data URL or raw base64
+      if (typeof data === 'string') {
+        if (data.startsWith('data:image/jpeg;base64,')) {
+          currentFrame.value = data
+        } else {
+          // Assume it's raw base64, add the data URL prefix
+          currentFrame.value = `data:image/jpeg;base64,${data}`
+        }
+      }
+    }
+
+    ws.onerror = (error) => {
+      console.error('WebSocket 错误:', error)
+      isConnecting.value = false
+      connectionStatus.value = '视频流连接失败'
+    }
+
+    ws.onclose = () => {
+      console.log('WebSocket 已断开')
+      isConnecting.value = false
+      connectionStatus.value = '视频流已断开'
+      currentFrame.value = null
+      
+      // Auto-reconnect after 3 seconds
+      setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.CLOSED) {
+          console.log('尝试自动重连...')
+          connectWebSocket()
+        }
+      }, 3000)
+    }
+  } catch (error) {
+    console.error('WebSocket 连接失败:', error)
+    isConnecting.value = false
+    connectionStatus.value = '无法连接到视频流'
+  }
+}
+
+// Reconnect handler
+const reconnectWebSocket = async () => {
+  if (ws) {
+    ws.close()
+    ws = null
+  }
+  currentFrame.value = null
+  clientIdData.value = null
+  
+  // 重新获取 client_id 并连接
+  await connectWebSocket()
+}
+
+// Lifecycle hooks
+onMounted(() => {
+  connectWebSocket()
+})
+
+onBeforeUnmount(() => {
+  if (ws) {
+    ws.close()
+    ws = null
+  }
+})
 
 // show a single monitoring panel (first source) per user request
 const panelsCount = computed(() => 1)
@@ -141,9 +322,28 @@ const panelsCount = computed(() => 1)
   color: #6b7280;
 }
 
-.camera-icon { font-size: 2rem }
+.camera-icon { 
+  width: 64px;
+  height: 64px;
+  color: #94a3b8;
+}
 .empty-text { font-size: 0.95rem }
-.retry-btn { background: #eef2ff; border: none; color: #2563eb; padding: 6px 10px; border-radius: 6px; cursor: pointer }
+.retry-btn { 
+  background: #eef2ff; 
+  border: none; 
+  color: #2563eb; 
+  padding: 6px 10px; 
+  border-radius: 6px; 
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.retry-btn:hover:not(:disabled) {
+  background: #dbeafe;
+}
+.retry-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
 @media (max-width: 640px) {
   .video-grid { grid-template-columns: 1fr }
@@ -164,28 +364,33 @@ const panelsCount = computed(() => 1)
 }
 
 .video-player-full {
-  /* make video narrower and taller (portrait-ish) */
-  width: min(360px, 85%);
-  aspect-ratio: 3 / 4; /* width : height = 3:4 -> taller than wide */
-  object-fit: cover;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   display: block;
 }
 
 @media (max-width: 700px) {
   .video-panel-full { min-height: 380px }
-  .video-player-full { width: min(320px, 92%); aspect-ratio: 3/4 }
 }
 
 .video-empty-full {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   color: #cbd5e1;
 }
 
-.video-empty-full .camera-icon { font-size: 3.5rem }
-.video-empty-full .empty-text { font-size: 1.1rem }
+.video-empty-full .camera-icon { 
+  width: 80px;
+  height: 80px;
+  color: #64748b;
+}
+.video-empty-full .empty-text { 
+  font-size: 1.1rem;
+  color: #94a3b8;
+}
 
 .video-panel-full .retry-btn { background: rgba(255,255,255,0.08); color: #fff; border-radius: 6px; padding: 8px 12px }
 </style>

@@ -4,17 +4,18 @@
     <h3 class="section-title">操作记录</h3>
     <div class="review-content">
       <div
-        v-if="records && records.length"
-        v-for="(item, index) in records"
+        v-if="sortedRecords && sortedRecords.length"
+        v-for="(item, index) in sortedRecords"
         :key="index"
         class="review-item"
       >
-        <span class="check-mark" :class="{ checked: item.checked }">
-          {{ item.checked ? '✓' : '○' }}
+        <span class="check-mark" :class="{ checked: item.status === 'finished' || item.status === 'done' || item.status === 'doing' }">
+          {{ (item.status === 'finished' || item.status === 'done' || item.status === 'doing') ? '✓' : '○' }}
         </span>
         <div class="item-content">
-          <div class="item-name">{{ item.name }}</div>
-          <div class="item-time">{{ item.time }}</div>
+          <div class="item-name">{{ item.sequence_no }} - {{ getStatusName(item.status) }}</div>
+          <div class="item-time" v-if="item.start_time">{{ formatTime(item.start_time) }} {{ item.operator_id || '' }}</div>
+          <div class="item-detail" v-if="item.device_id">设备: {{ item.device_id }}</div>
         </div>
       </div>
       <div v-else class="empty-records">暂无操作记录</div>
@@ -23,12 +24,59 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+
 const props = defineProps({
   records: {
     type: Array,
     default: () => []
   }
 })
+
+// 步骤类型到顺序的映射
+const STEP_ORDER = {
+  'leak_test': 0,    // 测漏
+  'cleaning': 1,     // 清洗
+  'disfection': 2,   // 消毒
+  'rinsing': 3,      // 漂洗
+  'drying': 4        // 干燥
+}
+
+// 对记录按步骤顺序排序
+const sortedRecords = computed(() => {
+  if (!props.records || props.records.length === 0) {
+    return []
+  }
+  
+  return [...props.records].sort((a, b) => {
+    const orderA = STEP_ORDER[a.step_type] ?? 999
+    const orderB = STEP_ORDER[b.step_type] ?? 999
+    return orderA - orderB
+  })
+})
+
+// 状态映射
+const getStatusName = (status) => {
+  const statusMap = {
+    'doing': '进行中',
+    'done': '已完成',
+    'finished': '已完成',
+    'pending': '等待中',
+    'waiting': '等待中'
+  }
+  return statusMap[status] || status
+}
+
+// 格式化时间戳
+const formatTime = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${month}-${day} ${hours}:${minutes}`
+}
 </script>
 
 <style scoped>
@@ -97,6 +145,12 @@ const props = defineProps({
   color: #374151;
   white-space: normal;
   word-break: break-word;
+}
+
+.item-detail {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-top: 2px;
 }
 
 .item-time {
