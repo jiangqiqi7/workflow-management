@@ -35,11 +35,12 @@ const props = defineProps({
 
 // 步骤类型到顺序的映射
 const STEP_ORDER = {
-  'leak_test': 0,    // 测漏
-  'cleaning': 1,     // 清洗
-  'disfection': 2,   // 消毒
-  'rinsing': 3,      // 漂洗
-  'drying': 4        // 干燥
+  'leak_test': 0,      // 测漏
+  'cleaning': 1,       // 清洗
+  'rinsing': 2,        // 漂洗
+  'disfection': 3,     // 消毒
+  'final_rinsing': 4,  // 终末漂洗
+  'drying': 5          // 干燥
 }
 
 // 对记录按步骤顺序排序

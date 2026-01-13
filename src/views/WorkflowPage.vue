@@ -1,6 +1,10 @@
 <template>
   <div class="workflow-page">
     <div class="container">
+      <div class="back-button-wrapper">
+        <el-button @click="handleBack" icon="ArrowLeft">返回列表</el-button>
+      </div>
+      
       <div v-if="loading" class="loading-state">
         <el-icon class="is-loading"><Loading /></el-icon>
         <span>加载中...</span>
@@ -45,19 +49,33 @@ import ReviewPanel from '../components/ReviewPanel.vue'
 import ReviewNotice from '../components/ReviewNotice.vue'
 import OperationButtons from '../components/OperationButtons.vue'
 
+const props = defineProps({
+  workflowId: {
+    type: String,
+    default: null
+  }
+})
+
+const emit = defineEmits(['back'])
+
 const workflowData = ref(null)
 const activeStep = ref('')
 const loading = ref(true)
 const error = ref('')
 let pollingTimer = null
 
+// 返回列表
+const handleBack = () => {
+  emit('back')
+}
+
 // 后端基础地址
 const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
 
 // API地址：开发环境使用代理，生产环境直接请求
 const apiUrl = import.meta.env.DEV 
-  ? '/api/gdmp/v1/api/nt/get_current_workspace_information'
-  : `${backendBase}/gdmp/v1/api/nt/get_current_workspace_information`
+  ? '/api/gdmp/v1/api/nt/get_specific_task'
+  : `${backendBase}/gdmp/v1/api/nt/get_specific_task`
 
 // 视频流WebSocket地址
 const wsUrl = computed(() => {
@@ -67,7 +85,15 @@ const wsUrl = computed(() => {
 // 获取工作台信息
 const fetchWorkflowData = async () => {
   try {
-    const response = await fetch(apiUrl)
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        taskid: props.workflowId
+      })
+    })
     const data = await response.json()
     
     if (data.code === 200) {
@@ -161,6 +187,10 @@ onUnmounted(() => {
   border-radius: 0.5rem;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   padding: 2rem;
+}
+
+.back-button-wrapper {
+  margin-bottom: 1rem;
 }
 
 .content-grid {

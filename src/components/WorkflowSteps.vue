@@ -35,15 +35,16 @@ defineEmits(['step-click'])
 
 // 步骤类型到顺序的映射
 const STEP_ORDER = {
-  'leak_test': 0,    // 测漏
-  'cleaning': 1,     // 清洗
-  'disfection': 2,   // 消毒
-  'rinsing': 3,      // 漂洗
-  'drying': 4        // 干燥
+  'leak_test': 0,      // 测漏
+  'cleaning': 1,       // 清洗
+  'rinsing': 2,        // 漂洗
+  'disfection': 3,     // 消毒
+  'final_rinsing': 4,  // 终末漂洗
+  'drying': 5          // 干燥
 }
 
 // 固定的步骤名称（用于显示）
-const STEP_TITLES = ['测漏', '清洗', '消毒', '漂洗', '干燥']
+const STEP_TITLES = ['测漏', '清洗', '漂洗', '消毒', '终末漂洗', '干燥']
 
 // 规范化步骤数据：对后端返回的步骤进行排序，并统一使用固定的标题
 const normalizedSteps = computed(() => {
