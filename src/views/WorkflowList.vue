@@ -20,7 +20,7 @@
         <span>当前洗消间暂无工作任务</span>
       </div>
 
-      <div v-else class="workflow-list">
+      <div v-else class="workflow-list" :class="{ 'two-columns': workflowList.length > 5 }">
         <div v-for="item in workflowList" :key="item.id" class="workflow-item">
           <div class="item-left">
             <div class="user-info">
@@ -28,6 +28,12 @@
                 <span class="user-name">{{ item.userName }}</span>
                 <span class="endoscope-id">{{ item.endoscopeId }}</span>
               </div>
+            </div>
+            <div class="progress-indicator">
+              <div 
+                class="indicator-light" 
+                :style="{ backgroundColor: getStepColor(item.currentStep, item.steps) }"
+              ></div>
             </div>
           </div>
 
@@ -37,16 +43,16 @@
               :activeStep="item.currentStep"
             />
             
-            <div v-if="item.error" class="error-message">
+            <div v-if="getTaskAlarm(item.id)" class="error-message">
               <el-icon class="error-icon"><CircleCloseFilled /></el-icon>
               <div class="error-content">
-                <div class="error-title">{{ item.error.stepName }} - 操作异常</div>
-                <div class="error-detail">{{ item.error.message }}</div>
+                <div class="error-title">{{ getTaskAlarm(item.id).alarm_type || '告警提示' }}</div>
+                <div class="error-detail">{{ getTaskAlarm(item.id).message }}</div>
               </div>
             </div>
             
             <WorkflowTimer 
-              v-else-if="item.currentStep"
+              v-else-if="item.currentStep && item.currentStep !== ''"
               :startTime="item.stepStartTime"
               :stepName="getStepName(item.currentStep, item.steps)"
             />
@@ -77,6 +83,7 @@ const loading = ref(true)
 const error = ref('')
 const roomName = ref('')
 const roomId2 = ref('')
+const taskAlarms = ref({}) // 存储每个任务的告警信息 { taskId: alarmData }
 let pollingTimer = null
 
 // 步骤类型映射
@@ -84,9 +91,21 @@ const STEP_NAMES = {
   'leak_test': '测漏',
   'cleaning': '清洗',
   'rinsing': '漂洗',
-  'disfection': '消毒',
+  'disfection': '消毒',  // 兼容后端数据
   'final_rinsing': '终末漂洗',
-  'drying': '干燥'
+  'drying': '干燥',
+  'wash_machine': '机洗'
+}
+
+// 步骤序号映射
+const STEP_NAMES_BY_SEQ = {
+  '1': '测漏',
+  '2': '清洗',
+  '3': '漂洗',
+  '4': '消毒',
+  '5': '终末漂洗',
+  '6': '干燥',
+  '7': '机洗'
 }
 
 // 后端基础地址
@@ -97,10 +116,131 @@ const apiUrl = import.meta.env.DEV
   ? '/api/gdmp/v1/api/nt/get_workspace_list'
   : `${backendBase}/gdmp/v1/api/nt/get_workspace_list`
 
+// 获取任务最新告警接口地址
+const alarmApiUrl = `${backendBase}/gdmp/v1/api/nt/get_latest_alarm`
+
+// ReviewNotice 告警接口地址
+const reviewNoticeAlarmUrl = import.meta.env.DEV
+  ? `/task/{taskId}/alarms`
+  : `http://36.103.203.206:8000/task/{taskId}/alarms`
+
+// 判断是否为机洗模式
+const isMachineWash = (steps) => {
+  if (!steps || steps.length === 0) return false
+  
+  // 找到漂洗步骤（sequence_no为'3'）
+  const rinsingStep = steps.find(step => step.sequence_no === '3')
+  if (!rinsingStep) return false
+  
+  // 找到漂洗后的下一步
+  const nextStep = steps.find(step => parseInt(step.sequence_no) > 3)
+  
+  // 如果下一步的sequence_no是7，则为机洗模式
+  return nextStep && nextStep.sequence_no === '7'
+}
+
 // 获取步骤名称
 const getStepName = (currentStep, steps) => {
+  // 如果是机洗模式，并且当前步骤是sequence_no为7的步骤
+  if (isMachineWash(steps) && currentStep === '7') {
+    return '机洗'
+  }
+  
+  // 优先使用序号映射
+  if (STEP_NAMES_BY_SEQ[currentStep]) {
+    return STEP_NAMES_BY_SEQ[currentStep]
+  }
+  
+  // 其次使用步骤类型映射
   const step = steps.find(s => s.sequence_no === currentStep)
   return step ? STEP_NAMES[step.step_type] || step.step_type : ''
+}
+
+// 根据当前步骤获取指示灯颜色（每个步骤一个颜色）
+const getStepColor = (currentStep, steps) => {
+  if (!currentStep || currentStep === '') return '#9ca3af' // 灰色（未开始）
+  
+  // 步骤颜色映射
+  const stepColors = {
+    '1': '#dc2626',  // 测漏 - 深红色
+    '2': '#ef4444',  // 清洗 - 红色
+    '3': '#f97316',  // 漂洗 - 橙色
+    '4': '#eab308',  // 消毒 - 黄色
+    '5': '#86efac',  // 终末漂洗 - 浅绿色
+    '6': '#15803d',  // 干燥 - 深绿色
+    '7': '#15803d'   // 机洗 - 深绿色
+  }
+  
+  return stepColors[currentStep] || '#6b7280' // 默认灰色
+}
+
+// 获取任务的最新告警记录（从 get_latest_alarm 接口）
+const fetchLatestAlarm = async (taskId) => {
+  if (!taskId) return null
+  
+  try {
+    const response = await fetch(alarmApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        task_id: taskId
+      })
+    })
+    const data = await response.json()
+    
+    // code: 0 表示成功找到告警
+    if (data.code === 0 && data.data) {
+      return {
+        source: 'latest_alarm',
+        ...data.data
+      }
+    }
+  } catch (err) {
+    console.error(`获取任务 ${taskId} 的最新告警失败:`, err)
+  }
+  return null
+}
+
+// 获取任务告警列表（从 ReviewNotice 接口）
+const fetchReviewNoticeAlarms = async (taskId) => {
+  if (!taskId) return null
+  
+  try {
+    const url = reviewNoticeAlarmUrl.replace('{taskId}', taskId)
+    const response = await fetch(url)
+    const data = await response.json()
+    
+    // 返回格式: { task_id, total, alarms: [] }
+    if (data.task_id !== undefined && data.total > 0 && data.alarms && data.alarms.length > 0) {
+      // 返回最新的一条告警
+      const latestAlarm = data.alarms[0]
+      return {
+        source: 'review_notice',
+        message: latestAlarm.message || latestAlarm.description || '检测到异常',
+        timestamp: latestAlarm.timestamp,
+        alarm_type: '告警提示'
+      }
+    }
+  } catch (err) {
+    console.error(`获取任务 ${taskId} 的 ReviewNotice 告警失败:`, err)
+  }
+  return null
+}
+
+// 获取任务的所有告警信息（合并两个接口）
+const fetchTaskAlarm = async (taskId) => {
+  if (!taskId) return null
+  
+  // 同时从两个接口获取告警
+  const [latestAlarm, reviewNoticeAlarm] = await Promise.all([
+    fetchLatestAlarm(taskId),
+    fetchReviewNoticeAlarms(taskId)
+  ])
+  
+  // 优先返回 latest_alarm 接口的数据，如果没有则使用 review_notice 接口的数据
+  return latestAlarm || reviewNoticeAlarm
 }
 
 // 获取工作流列表
@@ -141,6 +281,17 @@ const fetchWorkflowList = async () => {
           stepStartTime: item.stepStartTime || new Date().toISOString()
         }))
         error.value = ''
+        
+        // 获取每个任务的告警信息
+        for (const item of workflowList.value) {
+          const alarmData = await fetchTaskAlarm(item.id)
+          if (alarmData) {
+            taskAlarms.value[item.id] = alarmData
+          } else {
+            // 清除之前的告警数据（如果告警已解决）
+            delete taskAlarms.value[item.id]
+          }
+        }
       } else {
         // 没有任务数据（当前洗消间没有正在进行的任务）
         workflowList.value = []
@@ -174,48 +325,42 @@ const loadMockData = () => {
       userName: '李明',
       endoscopeId: 'AL4876',
       steps: [
-        { step_type: 'leak_test', status: 'finished', sequence_no: '0' },
-        { step_type: 'cleaning', status: 'finished', sequence_no: '1' },
-        { step_type: 'rinsing', status: 'finished', sequence_no: '2' },
-        { step_type: 'disfection', status: 'doing', sequence_no: '3' },
-        { step_type: 'final_rinsing', status: 'pending', sequence_no: '4' },
-        { step_type: 'drying', status: 'pending', sequence_no: '5' }
+        { step_type: 'leak_test', status: 'finished', sequence_no: '1' },
+        { step_type: 'cleaning', status: 'finished', sequence_no: '2' },
+        { step_type: 'rinsing', status: 'finished', sequence_no: '3' },
+        { step_type: 'disfection', status: 'doing', sequence_no: '4' },
+        { step_type: 'final_rinsing', status: 'pending', sequence_no: '5' },
+        { step_type: 'drying', status: 'pending', sequence_no: '6' }
       ],
-      currentStep: '3',
+      currentStep: '4',
       stepStartTime: new Date(Date.now() - 5 * 60 * 1000).toISOString()
     },
     {
       id: '002',
-      userName: '张华',
+      userName: '张华（机洗）',
       endoscopeId: 'BL5923',
       steps: [
-        { step_type: 'leak_test', status: 'finished', sequence_no: '0' },
-        { step_type: 'cleaning', status: 'error', sequence_no: '1' },
-        { step_type: 'rinsing', status: 'pending', sequence_no: '2' },
-        { step_type: 'disfection', status: 'pending', sequence_no: '3' },
-        { step_type: 'final_rinsing', status: 'pending', sequence_no: '4' },
-        { step_type: 'drying', status: 'pending', sequence_no: '5' }
+        { step_type: 'leak_test', status: 'finished', sequence_no: '1' },
+        { step_type: 'cleaning', status: 'finished', sequence_no: '2' },
+        { step_type: 'rinsing', status: 'finished', sequence_no: '3' },
+        { step_type: 'machine_wash', status: 'doing', sequence_no: '7' }
       ],
-      currentStep: '1',
-      stepStartTime: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
-      error: {
-        stepName: '清洗',
-        message: '水压异常，检测到水压低于标准值'
-      }
+      currentStep: '7',
+      stepStartTime: new Date(Date.now() - 8 * 60 * 1000).toISOString()
     },
     {
       id: '003',
       userName: '王芳',
       endoscopeId: 'CK7234',
       steps: [
-        { step_type: 'leak_test', status: 'finished', sequence_no: '0' },
-        { step_type: 'cleaning', status: 'finished', sequence_no: '1' },
-        { step_type: 'rinsing', status: 'finished', sequence_no: '2' },
-        { step_type: 'disfection', status: 'finished', sequence_no: '3' },
-        { step_type: 'final_rinsing', status: 'finished', sequence_no: '4' },
-        { step_type: 'drying', status: 'doing', sequence_no: '5' }
+        { step_type: 'leak_test', status: 'finished', sequence_no: '1' },
+        { step_type: 'cleaning', status: 'finished', sequence_no: '2' },
+        { step_type: 'rinsing', status: 'finished', sequence_no: '3' },
+        { step_type: 'disfection', status: 'finished', sequence_no: '4' },
+        { step_type: 'final_rinsing', status: 'finished', sequence_no: '5' },
+        { step_type: 'drying', status: 'doing', sequence_no: '6' }
       ],
-      currentStep: '5',
+      currentStep: '6',
       stepStartTime: new Date(Date.now() - 10 * 60 * 1000).toISOString()
     },
     {
@@ -223,14 +368,14 @@ const loadMockData = () => {
       userName: '刘强',
       endoscopeId: 'DM8765',
       steps: [
-        { step_type: 'leak_test', status: 'finished', sequence_no: '0' },
-        { step_type: 'cleaning', status: 'doing', sequence_no: '1' },
-        { step_type: 'rinsing', status: 'pending', sequence_no: '2' },
-        { step_type: 'disfection', status: 'pending', sequence_no: '3' },
-        { step_type: 'final_rinsing', status: 'pending', sequence_no: '4' },
-        { step_type: 'drying', status: 'pending', sequence_no: '5' }
+        { step_type: 'leak_test', status: 'finished', sequence_no: '1' },
+        { step_type: 'cleaning', status: 'doing', sequence_no: '2' },
+        { step_type: 'rinsing', status: 'pending', sequence_no: '3' },
+        { step_type: 'disfection', status: 'pending', sequence_no: '4' },
+        { step_type: 'final_rinsing', status: 'pending', sequence_no: '5' },
+        { step_type: 'drying', status: 'pending', sequence_no: '6' }
       ],
-      currentStep: '1',
+      currentStep: '2',
       stepStartTime: new Date(Date.now() - 3 * 60 * 1000).toISOString()
     },
     {
@@ -238,37 +383,36 @@ const loadMockData = () => {
       userName: '陈敏',
       endoscopeId: 'EN9234',
       steps: [
-        { step_type: 'leak_test', status: 'finished', sequence_no: '0' },
-        { step_type: 'cleaning', status: 'finished', sequence_no: '1' },
-        { step_type: 'rinsing', status: 'doing', sequence_no: '2' },
-        { step_type: 'disfection', status: 'pending', sequence_no: '3' },
-        { step_type: 'final_rinsing', status: 'pending', sequence_no: '4' },
-        { step_type: 'drying', status: 'pending', sequence_no: '5' }
+        { step_type: 'leak_test', status: 'finished', sequence_no: '1' },
+        { step_type: 'cleaning', status: 'finished', sequence_no: '2' },
+        { step_type: 'rinsing', status: 'doing', sequence_no: '3' },
+        { step_type: 'disfection', status: 'pending', sequence_no: '4' },
+        { step_type: 'final_rinsing', status: 'pending', sequence_no: '5' },
+        { step_type: 'drying', status: 'pending', sequence_no: '6' }
       ],
-      currentStep: '2',
+      currentStep: '3',
       stepStartTime: new Date(Date.now() - 4 * 60 * 1000).toISOString()
     },
     {
       id: '006',
-      userName: '赵磊',
+      userName: '赵磊（机洗）',
       endoscopeId: 'FK1098',
       steps: [
-        { step_type: 'leak_test', status: 'finished', sequence_no: '0' },
-        { step_type: 'cleaning', status: 'finished', sequence_no: '1' },
-        { step_type: 'rinsing', status: 'finished', sequence_no: '2' },
-        { step_type: 'disfection', status: 'finished', sequence_no: '3' },
-        { step_type: 'final_rinsing', status: 'error', sequence_no: '4' },
-        { step_type: 'drying', status: 'pending', sequence_no: '5' }
+        { step_type: 'leak_test', status: 'finished', sequence_no: '1' },
+        { step_type: 'cleaning', status: 'finished', sequence_no: '2' },
+        { step_type: 'rinsing', status: 'finished', sequence_no: '3' },
+        { step_type: 'machine_wash', status: 'pending', sequence_no: '7' }
       ],
-      currentStep: '4',
-      stepStartTime: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
-      error: {
-        stepName: '终末漂洗',
-        message: '终末漂洗时间超时，未检测到完成信号'
-      }
+      currentStep: '3',
+      stepStartTime: new Date(Date.now() - 6 * 60 * 1000).toISOString()
     }
   ]
   error.value = ''
+}
+
+// 获取任务的告警信息（用于模板显示）
+const getTaskAlarm = (taskId) => {
+  return taskAlarms.value[taskId] || null
 }
 
 // 查看详情
@@ -321,7 +465,7 @@ onUnmounted(() => {
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1800px;
   margin: 0 auto;
   padding: 0 1rem;
 }
@@ -371,7 +515,13 @@ onUnmounted(() => {
 
 .workflow-list {
   display: grid;
-  gap: 0.875rem;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+.workflow-list.two-columns {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
 }
 
 .workflow-item {
@@ -393,6 +543,9 @@ onUnmounted(() => {
 .item-left {
   flex-shrink: 0;
   width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .user-info {
@@ -425,6 +578,33 @@ onUnmounted(() => {
   border-radius: 0.25rem;
   display: inline-block;
   width: fit-content;
+}
+
+.progress-indicator {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.indicator-light {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.2), inset 0 0 10px rgba(255, 255, 255, 0.3);
+  transition: background-color 0.5s ease, box-shadow 0.5s ease;
+  position: relative;
+}
+
+.indicator-light::before {
+  content: '';
+  position: absolute;
+  top: 15%;
+  left: 15%;
+  width: 30%;
+  height: 30%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.8), transparent);
+  border-radius: 50%;
+  filter: blur(3px);
 }
 
 .item-center {

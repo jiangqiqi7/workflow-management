@@ -38,39 +38,88 @@ const STEP_ORDER = {
   'leak_test': 0,      // 测漏
   'cleaning': 1,       // 清洗
   'rinsing': 2,        // 漂洗
-  'disfection': 3,     // 消毒
+  'disfection': 3,   // 消毒（兼容后端数据）
   'final_rinsing': 4,  // 终末漂洗
-  'drying': 5          // 干燥
+  'drying': 5,          // 干燥
+  'wash_machine': 6    // 机洗
 }
 
 // 固定的步骤名称（用于显示）
 const STEP_TITLES = ['测漏', '清洗', '漂洗', '消毒', '终末漂洗', '干燥']
 
+// 判断是否为机洗模式
+const isMachineWash = computed(() => {
+  if (!props.steps || props.steps.length === 0) {
+    return false
+  }
+  
+  // 检查是否有wash_machine类型的步骤
+  const hasMachineWashStep = props.steps.some(step => step.step_type === 'wash_machine')
+  if (hasMachineWashStep) return true
+  
+  // 找到漂洗步骤（sequence_no为'3'）
+  const rinsingStep = props.steps.find(step => step.sequence_no === '3')
+  if (!rinsingStep) return false
+  
+  // 找到漂洗后的下一步
+  const nextStep = props.steps.find(step => parseInt(step.sequence_no) > 3)
+  
+  // 如果下一步的sequence_no是7，则为机洗模式
+  return nextStep && nextStep.sequence_no === '7'
+})
+
 // 规范化步骤数据：对后端返回的步骤进行排序，并统一使用固定的标题
 const normalizedSteps = computed(() => {
-  // 如果没有步骤数据，返回默认的5个步骤
+  // 如果没有步骤数据，返回默认的6个步骤
   if (!props.steps || props.steps.length === 0) {
     return STEP_TITLES.map((title, index) => ({
       title,
       status: 'wait',
-      sequence_no: index.toString(),
+      sequence_no: (index + 1).toString(),
       step_type: Object.keys(STEP_ORDER)[index]
     }))
   }
   
-  // 对后端返回的步骤按照 step_type 排序
   const sortedSteps = [...props.steps].sort((a, b) => {
-    const orderA = STEP_ORDER[a.step_type] ?? 999
-    const orderB = STEP_ORDER[b.step_type] ?? 999
-    return orderA - orderB
+    const seqA = parseInt(a.sequence_no)
+    const seqB = parseInt(b.sequence_no)
+    return seqA - seqB
   })
   
-  // 使用固定的标题名称，但保留后端返回的状态
-  return sortedSteps.map((step, index) => ({
-    ...step,
-    title: STEP_TITLES[index] || step.sequence_no,  // 使用固定标题，如果没有则使用后端返回的
-    sequence_no: index.toString()
-  }))
+  // 如果是机洗模式
+  if (isMachineWash.value) {
+    const result = []
+    
+    sortedSteps.forEach((step) => {
+      const seqNo = parseInt(step.sequence_no)
+      
+      if (seqNo <= 3) {
+        // 前三步保持不变：测漏、清洗、漂洗
+        result.push({
+          ...step,
+          title: STEP_TITLES[seqNo - 1] || step.sequence_no
+        })
+      } else if (seqNo === 7 || step.step_type === 'wash_machine') {
+        // sequence_no为7的步骤或step_type为wash_machine，合并为"机洗"
+        result.push({
+          ...step,
+          title: '机洗',
+          isMachineWashStep: true
+        })
+      }
+    })
+    
+    return result
+  }
+  
+  // 非机洗模式，按原逻辑处理
+  return sortedSteps.map((step) => {
+    const seqNo = parseInt(step.sequence_no)
+    return {
+      ...step,
+      title: STEP_TITLES[seqNo - 1] || step.sequence_no
+    }
+  })
 })
 
 // 计算当前激活步骤的索引

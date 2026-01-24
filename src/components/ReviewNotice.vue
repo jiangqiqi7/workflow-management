@@ -72,14 +72,43 @@ const fetchTaskId = async () => {
   }
 }
 
-// 获取告警信息
-const fetchAlarmData = async () => {
-  if (!taskId.value) {
-    return
-  }
+// 获取最新告警（从 get_latest_alarm 接口）
+const fetchLatestAlarm = async () => {
+  if (!taskId.value) return null
   
   try {
-    // 开发环境使用代理，生产环境直接请求
+    const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
+    const alarmApiUrl = `${backendBase}/gdmp/v1/api/nt/get_latest_alarm`
+    
+    const response = await fetch(alarmApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        task_id: taskId.value
+      })
+    })
+    const data = await response.json()
+    
+    // code: 0 表示成功找到告警
+    if (data.code === 0 && data.data) {
+      return {
+        source: 'latest_alarm',
+        ...data.data
+      }
+    }
+  } catch (err) {
+    console.error(`获取任务 ${taskId.value} 的最新告警失败:`, err)
+  }
+  return null
+}
+
+// 获取告警列表（从 ReviewNotice 接口）
+const fetchReviewNoticeAlarms = async () => {
+  if (!taskId.value) return null
+  
+  try {
     const url = import.meta.env.DEV
       ? `/task/${taskId.value}/alarms`
       : `http://36.103.203.206:8000/task/${taskId.value}/alarms`
@@ -87,23 +116,73 @@ const fetchAlarmData = async () => {
     const response = await fetch(url)
     const data = await response.json()
     
-    // 处理新格式: { task_id, total, alarms: [] }
-    if (data.task_id !== undefined) {
-      const oldCount = previousAlarmCount.value
-      const newCount = data.total || 0
+    // 返回格式: { task_id, total, alarms: [] }
+    if (data.task_id !== undefined && data.total > 0 && data.alarms && data.alarms.length > 0) {
+      return {
+        source: 'review_notice',
+        task_id: data.task_id,
+        total: data.total,
+        alarms: data.alarms
+      }
+    }
+  } catch (err) {
+    console.error(`获取任务 ${taskId.value} 的 ReviewNotice 告警失败:`, err)
+  }
+  return null
+}
+
+// 获取告警信息（合并两个接口的数据）
+const fetchAlarmData = async () => {
+  if (!taskId.value) {
+    return
+  }
+  
+  try {
+    // 同时从两个接口获取告警
+    const [latestAlarm, reviewNoticeAlarm] = await Promise.all([
+      fetchLatestAlarm(),
+      fetchReviewNoticeAlarms()
+    ])
+    
+    let mergedData = null
+    const oldCount = previousAlarmCount.value
+    
+    // 优先使用 latest_alarm 接口的数据
+    if (latestAlarm) {
+      // 将 latest_alarm 数据转换为 ReviewNotice 格式
+      mergedData = {
+        task_id: taskId.value,
+        total: 1,
+        alarms: [{
+          timestamp: latestAlarm.timestamp || Date.now(),
+          message: latestAlarm.message || '检测到异常',
+          description: latestAlarm.message || '检测到异常'
+        }]
+      }
+    } else if (reviewNoticeAlarm) {
+      // 使用 ReviewNotice 接口的数据
+      mergedData = reviewNoticeAlarm
+    }
+    
+    if (mergedData) {
+      const newCount = mergedData.total || 0
       
-      alarmData.value = data
+      alarmData.value = mergedData
       previousAlarmCount.value = newCount
       
-      console.log('告警信息:', data)
+      console.log('合并后的告警信息:', mergedData)
       
       // 如果有新的告警（数量增加），触发语音播报
-      if (newCount > oldCount && data.alarms && data.alarms.length > 0) {
+      if (newCount > oldCount && mergedData.alarms && mergedData.alarms.length > 0) {
         // 播报最新的告警
-        const latestAlarm = data.alarms[0]
+        const latestAlarm = mergedData.alarms[0]
         const message = latestAlarm.message || latestAlarm.description || '检测到新告警'
-        checkAndWarn(message)
+        speakWarning(message)
       }
+    } else {
+      // 没有告警数据
+      alarmData.value = null
+      previousAlarmCount.value = 0
     }
   } catch (error) {
     console.error('获取告警信息失败:', error)

@@ -11,7 +11,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Timer } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -48,12 +48,22 @@ const formattedTime = computed(() => {
 
 // 启动计时器
 const startTimer = () => {
+  // 清除之前的计时器
+  if (timerInterval) {
+    clearInterval(timerInterval)
+  }
+  
   elapsedSeconds.value = calculateElapsedTime()
   
   timerInterval = setInterval(() => {
     elapsedSeconds.value++
   }, 1000)
 }
+
+// 监听 startTime 变化，重新启动计时器
+watch(() => props.startTime, () => {
+  startTimer()
+})
 
 onMounted(() => {
   startTimer()

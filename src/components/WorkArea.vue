@@ -48,7 +48,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 
 const props = defineProps({
   activeStep: {
@@ -68,7 +68,13 @@ const props = defineProps({
   // WebSocket URL (can be overridden via prop)
   wsUrl: {
     type: String,
-    default: 'ws://36.103.203.206:8000/ai/video'
+    default: 'ws://117.50.241.174:8000/ai/video'
+    // default: 'ws://36.103.203.206:8000/ai/video'
+  },
+  // Source IP from WorkflowPage base_info
+  sourceIp: {
+    type: String,
+    default: null
   }
 })
 
@@ -79,58 +85,27 @@ let ws = null
 const currentFrame = ref(null)
 const isConnecting = ref(false)
 const connectionStatus = ref('正在连接视频流...')
-const clientIdData = ref(null)
 
-// 获取当前摄像头 client_id
-const fetchClientId = async () => {
-  // 测试模式：写死 client_id
-  return 'test'
-  
-  /* 正式模式：从后端获取 client_id
-  try {
-    // 开发环境使用代理，生产环境直接请求
-    const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
-    const apiUrl = import.meta.env.DEV 
-      ? '/api/gdmp/v1/api/nt/get_current_client_id'
-      : `${backendBase}/gdmp/v1/api/nt/get_current_client_id`
-    
-    const response = await fetch(apiUrl)
-    const data = await response.json()
-    
-    if (data.code === 200 && data.client_id) {
-      clientIdData.value = data
-      console.log('获取到摄像头 client_id:', data.client_id)
-      return data.client_id
-    } else {
-      console.log('当前没有正在进行的清洗任务')
-      connectionStatus.value = '当前没有正在进行的清洗任务'
-      return null
-    }
-  } catch (error) {
-    console.error('获取 client_id 失败:', error)
-    connectionStatus.value = '无法获取摄像头信息'
-    return null
-  }
-  */
-}
+// 由父组件传入的 source_ip 用于建立连接
 
 // Build final WS url with client_id param
-const buildWsUrl = async () => {
+const buildWsUrl = () => {
   const base = props.wsUrl
-  const cid = await fetchClientId()
-  
-  if (!cid) {
-    return null // 没有 client_id，不建立连接
+  const ip = props.sourceIp
+
+  if (!ip) {
+    return null // 没有 source_ip，不建立连接
   }
-  
+
   // Allow http(s) input and convert to ws(s)
   let url = base
   if (url.startsWith('http://')) url = 'ws://' + url.slice(7)
   if (url.startsWith('https://')) url = 'wss://' + url.slice(8)
   const hasQuery = url.includes('?')
-  const hasClientParam = /[?&]client_id=/.test(url)
-  if (!hasClientParam) {
-    url += (hasQuery ? '&' : '?') + `client_id=${encodeURIComponent(cid)}`
+  // 接口仍使用 client_id 参数名，但值为 source_ip
+  const hasParam = /[?&]client_id=/.test(url)
+  if (!hasParam) {
+    url += (hasQuery ? '&' : '?') + `client_id=${encodeURIComponent(ip)}`
   }
   return url
 }
@@ -145,11 +120,12 @@ const connectWebSocket = async () => {
   connectionStatus.value = '正在获取摄像头信息...'
 
   try {
-    const finalUrl = await buildWsUrl()
+    const finalUrl = buildWsUrl()
     
     if (!finalUrl) {
       isConnecting.value = false
-      return // 没有 client_id，不建立连接
+      connectionStatus.value = '无法获取摄像头信息'
+      return // 没有 source_ip，不建立连接
     }
     
     ws = new WebSocket(finalUrl)
@@ -209,7 +185,6 @@ const reconnectWebSocket = async () => {
     ws = null
   }
   currentFrame.value = null
-  clientIdData.value = null
   
   // 重新获取 client_id 并连接
   await connectWebSocket()
@@ -224,6 +199,12 @@ onBeforeUnmount(() => {
   if (ws) {
     ws.close()
     ws = null
+  }
+})
+// 当 sourceIp 更新且可用时，尝试重连以使用最新的地址
+watch(() => props.sourceIp, (newIp, oldIp) => {
+  if (newIp && newIp !== oldIp) {
+    reconnectWebSocket()
   }
 })
 

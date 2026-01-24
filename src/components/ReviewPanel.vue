@@ -13,7 +13,7 @@
           {{ (item.status === 'finished' || item.status === 'done' || item.status === 'doing') ? '✓' : '○' }}
         </span>
         <div class="item-content">
-          <div class="item-name">{{ item.sequence_no }} - {{ getStatusName(item.status) }}</div>
+          <div class="item-name">{{ getStepName(item.step_type) }} - {{ getStatusName(item.status) }}</div>
           <div class="item-time" v-if="item.start_time">{{ formatTime(item.start_time) }} {{ item.operator_id || '' }}</div>
           <div class="item-detail" v-if="item.device_id">设备: {{ item.device_id }}</div>
         </div>
@@ -41,6 +41,21 @@ const STEP_ORDER = {
   'disfection': 3,     // 消毒
   'final_rinsing': 4,  // 终末漂洗
   'drying': 5          // 干燥
+}
+
+// 步骤类型到中文名称的映射
+const STEP_NAMES = {
+  'leak_test': '测漏',
+  'cleaning': '清洗',
+  'rinsing': '漂洗',
+  'disfection': '消毒',
+  'final_rinsing': '终末漂洗',
+  'drying': '干燥'
+}
+
+// 获取步骤名称
+const getStepName = (stepType) => {
+  return STEP_NAMES[stepType] || stepType
 }
 
 // 对记录按步骤顺序排序

@@ -26,7 +26,7 @@
         />
 
         <div class="content-grid">
-          <WorkArea :activeStep="activeStep" :ws-url="wsUrl" @task-id-updated="handleTaskIdUpdated" />
+          <WorkArea :activeStep="activeStep" :ws-url="wsUrl" :source-ip="sourceIp" @task-id-updated="handleTaskIdUpdated" />
           <div>
             <ReviewNotice />
             <ReviewPanel :records="workflowData.step_records" />
@@ -79,7 +79,12 @@ const apiUrl = import.meta.env.DEV
 
 // 视频流WebSocket地址
 const wsUrl = computed(() => {
-  return import.meta.env.VITE_VIDEO_STREAM_URL || 'ws://36.103.203.206:8000/ai/video'
+  return import.meta.env.VITE_VIDEO_STREAM_URL || 'ws://117.50.241.174:8000/ai/video'
+})
+
+// 提供给 WorkArea 的 source_ip
+const sourceIp = computed(() => {
+  return workflowData.value?.base_info?.source_ip || null
 })
 
 // 获取工作台信息
