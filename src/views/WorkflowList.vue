@@ -75,6 +75,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { parseBusinessScriptContent, unwrapBusinessScriptResponse } from '../utils/helpers.js'
+import { getBackendBase, getReviewNoticeBase } from '../utils/config.js'
 import { Loading, WarningFilled, InfoFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import ListSteps from '../components/ListSteps.vue'
 import WorkflowTimer from '../components/WorkflowTimer.vue'
@@ -95,7 +96,7 @@ const STEP_NAMES = {
   'disfection': '消毒',  // 兼容后端数据
   'final_rinsing': '终末漂洗',
   'drying': '干燥',
-  'wash_machine': '机洗'
+  'wash_machine': '进入机洗'
 }
 
 // 步骤序号映射
@@ -106,36 +107,46 @@ const STEP_NAMES_BY_SEQ = {
   '4': '消毒',
   '5': '终末漂洗',
   '6': '干燥',
-  '7': '机洗'
+  '7': '进入机洗'
 }
 
-// 后端基础地址
-const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
+// 获取API地址（从配置文件）
+const getApiUrl = () => {
+  const backendBase = getBackendBase()
+  return import.meta.env.DEV 
+    ? '/cms/v1/module/business_script/runScriptByCode?code=get_workspace_list'
+    : `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_workspace_list`
+}
 
-// API地址
-const apiUrl = import.meta.env.DEV 
-  ? '/cms/v1/module/business_script/runScriptByCode?code=get_workspace_list'
-  : `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_workspace_list`
+const getAlarmApiUrl = () => {
+  const backendBase = getBackendBase()
+  return `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_latest_alarm`
+}
 
-// 获取任务最新告警接口地址
-const alarmApiUrl = `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_latest_alarm`
-// ReviewNotice 告警接口地址
-const reviewNoticeAlarmUrl = import.meta.env.DEV
-  ? `/task/{taskId}/alarms`
-  : `http://36.103.203.206:8000/task/{taskId}/alarms`
+const getReviewNoticeAlarmUrl = (taskId) => {
+  const reviewNoticeBase = getReviewNoticeBase()
+  return import.meta.env.DEV
+    ? `/task/${taskId}/alarms`
+    : `${reviewNoticeBase}/task/${taskId}/alarms`
+}
+
+const getRoomIdApiUrl = () => {
+  const backendBase = getBackendBase()
+  return `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_room_id`
+}
 
 // 判断是否为机洗模式
 const isMachineWash = (steps) => {
   if (!steps || steps.length === 0) return false
   
-  // 找到漂洗步骤（sequence_no为'3'）
-  const rinsingStep = steps.find(step => step.sequence_no === '3')
-  if (!rinsingStep) return false
+  // 检查是否有sequence_no为7的步骤（机洗步骤）
+  const hasMachineWashStep = steps.some(step => step.sequence_no === '7' || step.step_type === 'wash_machine')
+  if (!hasMachineWashStep) return false
   
-  // 找到漂洗后的下一步
-  const nextStep = steps.find(step => parseInt(step.sequence_no) > 3)
+  // 检查清洗步骤后的下一步
+  const nextStep = steps.find(step => parseInt(step.sequence_no) > 2)
   
-  // 如果下一步的sequence_no是7，则为机洗模式
+  // 如果清洗后直接跳到机洗（sequence_no为7），则为机洗模式
   return nextStep && nextStep.sequence_no === '7'
 }
 
@@ -179,7 +190,7 @@ const fetchLatestAlarm = async (taskId) => {
   if (!taskId) return null
   
   try {
-    const response = await fetch(alarmApiUrl, {
+    const response = await fetch(getAlarmApiUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -217,7 +228,7 @@ const fetchReviewNoticeAlarms = async (taskId) => {
   if (!taskId) return null
   
   try {
-    const url = reviewNoticeAlarmUrl.replace('{taskId}', taskId)
+    const url = getReviewNoticeAlarmUrl(taskId)
     const response = await fetch(url)
     const data = await response.json()
     
@@ -260,7 +271,7 @@ const fetchWorkflowList = async () => {
   }
   
   try {
-    const response = await fetch(apiUrl, {
+    const response = await fetch(getApiUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -440,7 +451,7 @@ const startPolling = () => {
 // 获取房间名称
 const fetchRoomName = async () => {
   try {
-    const response = await fetch('http://116.204.65.72:8881/cms/v1/module/business_script/runScriptByCode?code=get_room_id', {
+    const response = await fetch(getRoomIdApiUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

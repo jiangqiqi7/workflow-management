@@ -49,6 +49,7 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { getVideoStreamUrl } from '../utils/config.js'
 
 const props = defineProps({
   activeStep: {
@@ -68,8 +69,7 @@ const props = defineProps({
   // WebSocket URL (can be overridden via prop)
   wsUrl: {
     type: String,
-    default: 'ws://117.50.241.174:8000/ai/video'
-    // default: 'ws://36.103.203.206:8000/ai/video'
+    default: () => getVideoStreamUrl()
   },
   // Source IP from WorkflowPage base_info
   sourceIp: {

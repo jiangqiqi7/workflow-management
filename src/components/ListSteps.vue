@@ -94,20 +94,21 @@ const normalizedSteps = computed(() => {
     sortedSteps.forEach((step) => {
       const seqNo = parseInt(step.sequence_no)
       
-      if (seqNo <= 3) {
-        // 前三步保持不变：测漏、清洗、漂洗
+      if (seqNo <= 2) {
+        // 前两步：测漏、清洗
         result.push({
           ...step,
           title: STEP_TITLES[seqNo - 1] || step.sequence_no
         })
       } else if (seqNo === 7 || step.step_type === 'wash_machine') {
-        // sequence_no为7的步骤或step_type为wash_machine，合并为"机洗"
+        // sequence_no为7的步骤或step_type为wash_machine，显示为"机洗"
         result.push({
           ...step,
           title: '机洗',
           isMachineWashStep: true
         })
       }
+      // 跳过漂洗步骤(seqNo === 3)
     })
     
     return result

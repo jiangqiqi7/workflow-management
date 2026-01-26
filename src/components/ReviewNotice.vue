@@ -23,6 +23,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import { parseBusinessScriptContent, unwrapBusinessScriptResponse } from '../utils/helpers.js'
+import { getBackendBase, getReviewNoticeBase } from '../utils/config.js'
 
 const alarmData = ref(null)
 const previousAlarmCount = ref(0)
@@ -51,7 +52,7 @@ const formatTime = (timestamp) => {
 const fetchTaskId = async () => {
   try {
     // 开发环境使用代理，生产环境直接请求
-    const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
+    const backendBase = getBackendBase()
     const apiUrl = import.meta.env.DEV 
       ? '/cms/v1/module/business_script/runScriptByCode?code=get_current_client_id'
       : `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_current_client_id`
@@ -85,7 +86,7 @@ const fetchLatestAlarm = async () => {
   if (!taskId.value) return null
   
   try {
-    const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
+    const backendBase = getBackendBase()
     const alarmApiUrl = `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_latest_alarm`
     
     const response = await fetch(alarmApiUrl, {
@@ -125,9 +126,10 @@ const fetchReviewNoticeAlarms = async () => {
   if (!taskId.value) return null
   
   try {
+    const reviewNoticeBase = getReviewNoticeBase()
     const url = import.meta.env.DEV
       ? `/task/${taskId.value}/alarms`
-      : `http://36.103.203.206:8000/task/${taskId.value}/alarms`
+      : `${reviewNoticeBase}/task/${taskId.value}/alarms`
     
     const response = await fetch(url)
     const data = await response.json()

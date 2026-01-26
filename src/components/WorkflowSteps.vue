@@ -57,14 +57,10 @@ const isMachineWash = computed(() => {
   const hasMachineWashStep = props.steps.some(step => step.step_type === 'wash_machine')
   if (hasMachineWashStep) return true
   
-  // 找到漂洗步骤（sequence_no为'3'）
-  const rinsingStep = props.steps.find(step => step.sequence_no === '3')
-  if (!rinsingStep) return false
+  // 检查清洗步骤后的下一步
+  const nextStep = props.steps.find(step => parseInt(step.sequence_no) > 2)
   
-  // 找到漂洗后的下一步
-  const nextStep = props.steps.find(step => parseInt(step.sequence_no) > 3)
-  
-  // 如果下一步的sequence_no是7，则为机洗模式
+  // 如果清洗后直接跳到机洗（sequence_no为7），则为机洗模式
   return nextStep && nextStep.sequence_no === '7'
 })
 
@@ -93,20 +89,21 @@ const normalizedSteps = computed(() => {
     sortedSteps.forEach((step) => {
       const seqNo = parseInt(step.sequence_no)
       
-      if (seqNo <= 3) {
-        // 前三步保持不变：测漏、清洗、漂洗
+      if (seqNo <= 2) {
+        // 前两步：测漏、清洗
         result.push({
           ...step,
           title: STEP_TITLES[seqNo - 1] || step.sequence_no
         })
       } else if (seqNo === 7 || step.step_type === 'wash_machine') {
-        // sequence_no为7的步骤或step_type为wash_machine，合并为"机洗"
+        // sequence_no为7的步骤或step_type为wash_machine，显示为"机洗"
         result.push({
           ...step,
           title: '机洗',
           isMachineWashStep: true
         })
       }
+      // 跳过漂洗步骤(seqNo === 3)
     })
     
     return result

@@ -1,0 +1,7 @@
+{
+  "apiConfig": {
+    "backendBase": "http://116.204.65.72:8881",
+    "reviewNoticeBase": "http://36.103.203.206:8000",
+    "videoStreamUrl": "ws://117.50.241.174:8000/ai/video"
+  }
+}

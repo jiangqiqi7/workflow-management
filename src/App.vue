@@ -9,6 +9,7 @@
 import { ref, onMounted } from 'vue'
 import WorkflowList from './views/WorkflowList.vue'
 import WorkflowPage from './views/WorkflowPage.vue'
+import { loadConfig } from './utils/config.js'
 
 const currentView = ref('list')
 const selectedWorkflowId = ref(null)
@@ -25,7 +26,10 @@ const goToList = () => {
   selectedWorkflowId.value = null
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 加载配置文件
+  await loadConfig()
+  
   window.addEventListener('view-workflow-detail', viewDetail)
 })
 </script>

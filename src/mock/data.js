@@ -48,7 +48,6 @@ export const mockMachineWashData = {
     step_records: [
         { sequence_no: "1", status: "finished", step_type: "leak_test" },
         { sequence_no: "2", status: "finished", step_type: "cleaning" },
-        { sequence_no: "3", status: "finished", step_type: "rinsing" },
         { sequence_no: "7", status: "doing", step_type: "machine_wash" }
     ]
 }

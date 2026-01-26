@@ -49,6 +49,7 @@ import WorkArea from '../components/WorkArea.vue'
 import ReviewPanel from '../components/ReviewPanel.vue'
 import ReviewNotice from '../components/ReviewNotice.vue'
 import OperationButtons from '../components/OperationButtons.vue'
+import { getBackendBase, getVideoStreamUrl } from '../utils/config.js'
 
 const props = defineProps({
   workflowId: {
@@ -70,17 +71,17 @@ const handleBack = () => {
   emit('back')
 }
 
-// 后端基础地址
-const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
+// 获取API地址（从配置文件）
+const getApiUrl = () => {
+  const backendBase = getBackendBase()
+  return import.meta.env.DEV 
+    ? '/cms/v1/module/business_script/runScriptByCode?code=get_specific_task'
+    : `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_specific_task`
+}
 
-// API地址：开发环境使用代理，生产环境直接请求
-const apiUrl = import.meta.env.DEV 
-  ? '/cms/v1/module/business_script/runScriptByCode?code=get_specific_task'
-  : `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_specific_task`
-
-// 视频流WebSocket地址
+// 视频流WebSocket地址（从配置文件）
 const wsUrl = computed(() => {
-  return import.meta.env.VITE_VIDEO_STREAM_URL || 'ws://117.50.241.174:8000/ai/video'
+  return import.meta.env.VITE_VIDEO_STREAM_URL || getVideoStreamUrl()
 })
 
 // 提供给 WorkArea 的 source_ip
@@ -91,7 +92,7 @@ const sourceIp = computed(() => {
 // 获取工作台信息
 const fetchWorkflowData = async () => {
   try {
-    const response = await fetch(apiUrl, {
+    const response = await fetch(getApiUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
