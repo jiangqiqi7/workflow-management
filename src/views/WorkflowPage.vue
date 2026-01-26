@@ -42,6 +42,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Loading, WarningFilled, InfoFilled } from '@element-plus/icons-vue'
+import { unwrapBusinessScriptResponse } from '../utils/helpers.js'
 import WorkflowHeader from '../components/WorkflowHeader.vue'
 import WorkflowSteps from '../components/WorkflowSteps.vue'
 import WorkArea from '../components/WorkArea.vue'
@@ -74,8 +75,8 @@ const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.
 
 // API地址：开发环境使用代理，生产环境直接请求
 const apiUrl = import.meta.env.DEV 
-  ? '/api/gdmp/v1/api/nt/get_specific_task'
-  : `${backendBase}/gdmp/v1/api/nt/get_specific_task`
+  ? '/cms/v1/module/business_script/runScriptByCode?code=get_specific_task'
+  : `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_specific_task`
 
 // 视频流WebSocket地址
 const wsUrl = computed(() => {
@@ -100,21 +101,22 @@ const fetchWorkflowData = async () => {
       })
     })
     const data = await response.json()
-    
-    if (data.code === 200) {
-      if (data.message === '当前没有正在进行的任务') {
+    const payload = unwrapBusinessScriptResponse(data)
+
+    if (payload.code === 200) {
+      if (payload.message === '当前没有正在进行的任务') {
         workflowData.value = null
         taskId.value = null
       } else {
-        workflowData.value = data
+        workflowData.value = payload
         // 设置当前激活步骤
-        if (data.current_step) {
-          activeStep.value = data.current_step.sequence_no
+        if (payload.current_step) {
+          activeStep.value = payload.current_step.sequence_no
         }
       }
       error.value = ''
     } else {
-      error.value = data.message || '获取数据失败'
+      error.value = payload.message || '获取数据失败'
     }
   } catch (err) {
     error.value = '网络请求失败: ' + err.message

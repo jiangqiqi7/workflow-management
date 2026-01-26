@@ -22,6 +22,7 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
+import { parseBusinessScriptContent, unwrapBusinessScriptResponse } from '../utils/helpers.js'
 
 const alarmData = ref(null)
 const previousAlarmCount = ref(0)
@@ -52,20 +53,27 @@ const fetchTaskId = async () => {
     // 开发环境使用代理，生产环境直接请求
     const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
     const apiUrl = import.meta.env.DEV 
-      ? '/api/gdmp/v1/api/nt/get_current_client_id'
-      : `${backendBase}/gdmp/v1/api/nt/get_current_client_id`
+      ? '/cms/v1/module/business_script/runScriptByCode?code=get_current_client_id'
+      : `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_current_client_id`
     
     const response = await fetch(apiUrl)
     const data = await response.json()
+    const payload = unwrapBusinessScriptResponse(data)
     
-    if (data.code === 200 && data.task_id) {
-      taskId.value = data.task_id
-      console.log('获取到 task_id:', data.task_id)
-      return data.task_id
-    } else {
-      console.log('当前没有正在进行的清洗任务')
-      return null
+    let tid = null
+    if (payload && typeof payload === 'object') {
+      // 优先在解析后的对象中查找 task_id/client_id
+      tid = payload.task_id || payload.client_id || payload.id || null
     }
+
+    if (tid) {
+      taskId.value = tid
+      console.log('获取到 task_id:', tid)
+      return tid
+    }
+
+    console.log('当前没有正在进行的清洗任务')
+    return null
   } catch (error) {
     console.error('获取 task_id 失败:', error)
     return null
@@ -78,7 +86,7 @@ const fetchLatestAlarm = async () => {
   
   try {
     const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.72:8881'
-    const alarmApiUrl = `${backendBase}/gdmp/v1/api/nt/get_latest_alarm`
+    const alarmApiUrl = `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_latest_alarm`
     
     const response = await fetch(alarmApiUrl, {
       method: 'POST',
@@ -91,11 +99,19 @@ const fetchLatestAlarm = async () => {
     })
     const data = await response.json()
     
-    // code: 0 表示成功找到告警
-    if (data.code === 0 && data.data) {
+    // 支持 content 为字符串的情况：统一反解
+    let alarmPayload = null
+    const payload = unwrapBusinessScriptResponse(data)
+    if (payload.code === 0 && payload.data) {
+      alarmPayload = payload.data
+    } else if (payload && typeof payload === 'object' && !payload.code) {
+      alarmPayload = payload
+    }
+
+    if (alarmPayload) {
       return {
         source: 'latest_alarm',
-        ...data.data
+        ...alarmPayload
       }
     }
   } catch (err) {

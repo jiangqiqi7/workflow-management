@@ -74,6 +74,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { parseBusinessScriptContent, unwrapBusinessScriptResponse } from '../utils/helpers.js'
 import { Loading, WarningFilled, InfoFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import ListSteps from '../components/ListSteps.vue'
 import WorkflowTimer from '../components/WorkflowTimer.vue'
@@ -113,12 +114,11 @@ const backendBase = import.meta.env.VITE_BACKEND_BASE_URL || 'http://116.204.65.
 
 // API地址
 const apiUrl = import.meta.env.DEV 
-  ? '/api/gdmp/v1/api/nt/get_workspace_list'
-  : `${backendBase}/gdmp/v1/api/nt/get_workspace_list`
+  ? '/cms/v1/module/business_script/runScriptByCode?code=get_workspace_list'
+  : `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_workspace_list`
 
 // 获取任务最新告警接口地址
-const alarmApiUrl = `${backendBase}/gdmp/v1/api/nt/get_latest_alarm`
-
+const alarmApiUrl = `${backendBase}/cms/v1/module/business_script/runScriptByCode?code=get_latest_alarm`
 // ReviewNotice 告警接口地址
 const reviewNoticeAlarmUrl = import.meta.env.DEV
   ? `/task/{taskId}/alarms`
@@ -190,11 +190,20 @@ const fetchLatestAlarm = async (taskId) => {
     })
     const data = await response.json()
     
-    // code: 0 表示成功找到告警
-    if (data.code === 0 && data.data) {
+    // 支持 content 为字符串的情况：去掉外围引号并解析
+    let alarmPayload = null
+    const payload = unwrapBusinessScriptResponse(data)
+    if (payload.code === 0 && payload.data) {
+      alarmPayload = payload.data
+    } else if (payload && typeof payload === 'object' && !payload.code) {
+      // If no code/data structure, use payload directly
+      alarmPayload = payload
+    }
+
+    if (alarmPayload) {
       return {
         source: 'latest_alarm',
-        ...data.data
+        ...alarmPayload
       }
     }
   } catch (err) {
@@ -261,18 +270,19 @@ const fetchWorkflowList = async () => {
       })
     })
     const data = await response.json()
+    const payload = unwrapBusinessScriptResponse(data)
     
     // 处理成功响应
-    if (data.code === 200) {
+    if (payload.code === 200) {
       // 有任务数据
-      if (data.data && data.data.length > 0) {
+      if (payload.data && payload.data.length > 0) {
         // 从第一个任务中提取 room_name（如果存在）
-        if (data.data[0].room_name) {
-          roomName.value = data.data[0].room_name
+        if (payload.data[0].room_name) {
+          roomName.value = payload.data[0].room_name
         }
         
         // 直接使用返回的数据，字段名已经匹配
-        workflowList.value = data.data.map(item => ({
+        workflowList.value = payload.data.map(item => ({
           id: item.id,
           userName: item.userName || '未知操作员',
           endoscopeId: item.endoscopeId || '',
@@ -297,14 +307,14 @@ const fetchWorkflowList = async () => {
         workflowList.value = []
         error.value = ''
       }
-    } else if (data.code === 500) {
+    } else if (payload.code === 500) {
       // 服务器错误
-      error.value = data.message || '服务器内部错误'
-      console.error('服务器错误:', data.error)
+      error.value = payload.message || '服务器内部错误'
+      console.error('服务器错误:', payload.error)
       workflowList.value = []
     } else {
       // 其他错误情况
-      error.value = data.message || '获取数据失败'
+      error.value = payload.message || '获取数据失败'
       workflowList.value = []
     }
   } catch (err) {
@@ -430,14 +440,45 @@ const startPolling = () => {
 // 获取房间名称
 const fetchRoomName = async () => {
   try {
-    const response = await fetch('http://116.204.65.72:8881/gdmp/v1/api/nt/get_room_id')
+    const response = await fetch('http://116.204.65.72:8881/cms/v1/module/business_script/runScriptByCode?code=get_room_id', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
     const data = await response.json()
     console.log('Room ID API响应:', data)
-    if (data.room_id2) {
-      roomId2.value = data.room_id2
+    const decodeEscapes = (str) => {
+      try {
+        return JSON.parse('"' + String(str).replace(/"/g, '\\"') + '"')
+      } catch (_) {
+        return str
+      }
     }
-    if (data.room_id3) {
-      roomName.value = data.room_id3
+
+    const parseRoomContent = (raw) => {
+      if (!raw) return {}
+      if (typeof raw === 'object' && raw !== null) return raw
+      const text = String(raw).trim()
+      // Try parsing as JSON first (handles correct `{"room_id1":...}` strings)
+      try {
+        const obj = JSON.parse(text)
+        return obj
+      } catch (_) {}
+      // Fallback: tolerate malformed content with spaces or underscores
+      const id1 = (text.match(/room[_\s]*id1"\s*:\s*"([^"]+)"/i) || [])[1] || null
+      const id2 = (text.match(/room[_\s]*id2"\s*:\s*"([^"]+)"/i) || [])[1] || null
+      const id3Raw = (text.match(/room[_\s]*id3"\s*:\s*"([^"]+)"/i) || [])[1] || null
+      const id3 = id3Raw ? decodeEscapes(id3Raw) : null
+      return { room_id1: id1, room_id2: id2, room_id3: id3 }
+    }
+
+      const content = parseBusinessScriptContent(data.content)
+    if (content.room_id2) {
+      roomId2.value = content.room_id2
+    }
+    if (content.room_id3) {
+      roomName.value = content.room_id3
     }
   } catch (err) {
     console.error('获取房间名称失败:', err)
